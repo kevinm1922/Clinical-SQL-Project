@@ -1,0 +1,171 @@
+
+
+drop table if exists `sample_block_query`;
+create table if not exists `sample_block_query` as (
+WITH
+dx_table as (
+select distinct d.patient_id
+from `disease` d
+left join `patient` p on p.patient_id = d.patient_id
+where
+(
+
+((d.cancer_type = 'NSCLC'))
+
+and  (
+      (CAST(p.newest_report_date as DATE) >= DATE_SUB(current_date() , INTERVAL 1 YEAR)  or
+      CAST(p.first_encounter_date as DATE) >= DATE_SUB(current_date() , INTERVAL 1 YEAR))
+    )
+
+)
+)
+
+
+, mutation_table as (
+select distinct patient_id
+ , max(case when (
+lower(gene_name) like lower('%kras%')
+
+ ) then 1 else 0 end) over (partition by patient_id) as has_KRAS_mut
+
+from `mutation` 
+where 
+  (variant_significance = 'Pathogenic' or
+   variant_significance = 'Likely pathogenic'
+   or variant_significance ='Variant of Unknown Significance')
+)
+, demographic_table as (
+select distinct
+    d.patient_id
+    , case when d.patient_id is not null then 1 else 0 end greater_than_eighteen
+from `demographic` d
+left join `patient` p on p.patient_id = d.patient_id
+where age >= 18 and deceased = false
+)
+
+, stage_table as (
+select distinct
+    patient_id
+    , case when (stage_grade in ('3A', --Stage III 
+                        '3'))
+    or
+              (stage_grade in ('4', --Stage IV
+                                '4A'))
+     or
+   (stage_grade is null)   then 1 else 0 end has_adv_met
+from `disease`
+)
+
+, treatment_data as (
+select distinct
+patient_id
+, case when patient_id is not null then 1 else 0 end has_treatment_data 
+from `medication`
+where
+(classification is not null)
+)
+
+
+, medication_data as (
+select distinct patient_id
+, max(case when 
+lower(name_label) like lower('%osimertinib%') or
+lower(name_label) like lower('%afatinib%') 
+then 1 else 0 end) over (partition by patient_id) as treated_with_specified_medications
+
+from `medication`
+)
+, site_table        as (
+            select distinct
+                 patient_id
+               , site_name
+        from
+        (select distinct   patient_id
+                          , pim.institution_name        as site_name
+            from new_institutions pim
+                     left join institutions_1 inst
+                               on pim.institution_sc = inst.institution_sc_id
+            -- </editor-fold>
+      ) sub
+      )
+SELECT DISTINCT
+patient_id
+, site_name
+, case when lower(site_name) like lower('%random%hospital%')  then 1 else 0 end as has_sites 
+, new_patient_id
+, has_KRAS_mut
+, has_SEQ_data 
+ , cancer_site
+, greater_than_eighteen
+, has_adv_met
+, has_treatment_data
+, treated_with_specified_medications
+FROM dx_table
+LEFT JOIN mutation_table using (patient_id)
+LEFT JOIN demographic_table using (patient_id)
+LEFT JOIN stage_table using (patient_id)
+LEFT JOIN treatment_data using (patient_id)
+LEFT JOIN medication_data using (patient_id)
+LEFT JOIN cancer_table using (patient_id)
+LEFT JOIN  site_table using (patient_id)
+);
+
+  
+
+-- Final cohort  
+select
+     '1.  NSCLC pts >= 18 yrs old'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+union
+distinct
+select
+     '2. Adv/Met'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+and has_adv_met = 1 
+union
+distinct
+select
+     '3. KRAS mutation'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+and has_adv_met = 1 
+and has_KRAS_mut = 1 
+union
+distinct
+select
+     '4. At least 1L therapy'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+and has_adv_met = 1 
+and has_KRAS_mut = 1 
+and has_treatment_data = 1 
+union
+distinct
+select
+     '5. No previous treatment with EGFR inhibitors'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+and has_adv_met = 1 
+and has_KRAS_mut = 1 
+and has_treatment_data = 1 
+and treated_with_specified_medications != 1 
+union
+distinct
+select
+     '6. At Site'                  as criteria
+  , count(distinct patient_id) as num
+from sample_block_query
+where greater_than_eighteen = 1
+and has_adv_met = 1 
+and has_KRAS_mut = 1 
+and has_treatment_data = 1 
+and treated_with_specified_medications != 1 
+and has_sites = 1 
+order by criteria;
