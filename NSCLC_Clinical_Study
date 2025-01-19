@@ -1,6 +1,6 @@
 
 
---Sample CTE Queries Example:
+--Sample CTE Queries Examples:
 
 drop table if exists `sample_block_query`;
 create table if not exists `sample_block_query` as (
