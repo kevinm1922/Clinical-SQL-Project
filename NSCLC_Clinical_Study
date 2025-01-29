@@ -7,8 +7,8 @@ create table if not exists `sample_block_query` as (
 WITH
 dx_table as (
 select distinct d.patient_id
-from `disease` d
-left join `patient` p on p.patient_id = d.patient_id
+from `disease.table` d
+left join `patient.table` p on p.patient_id = d.patient_id
 where
 (
 
@@ -30,7 +30,7 @@ lower(gene_name) like lower('%kras%')
 
  ) then 1 else 0 end) over (partition by patient_id) as has_KRAS_mut
 
-from `mutation` 
+from `mutation.table` 
 where 
   (variant_significance = 'Pathogenic' or
    variant_significance = 'Likely pathogenic'
@@ -40,8 +40,8 @@ where
 select distinct
     d.patient_id
     , case when d.patient_id is not null then 1 else 0 end greater_than_eighteen
-from `demographic` d
-left join `patient` p on p.patient_id = d.patient_id
+from `demographic.table` d
+left join `patient.table` p on p.patient_id = d.patient_id
 where age >= 18 and deceased = false
 )
 
@@ -55,14 +55,14 @@ select distinct
                                 '4A'))
      or
    (stage_grade is null)   then 1 else 0 end has_adv_met
-from `disease`
+from `disease.table`
 )
 
 , treatment_data as (
 select distinct
 patient_id
 , case when patient_id is not null then 1 else 0 end has_treatment_data 
-from `medication`
+from `medication.table`
 where
 (classification is not null)
 )
@@ -75,7 +75,7 @@ lower(name_label) like lower('%osimertinib%') or
 lower(name_label) like lower('%afatinib%') 
 then 1 else 0 end) over (partition by patient_id) as treated_with_specified_medications
 
-from `medication`
+from `medication.table`
 )
 , site_table        as (
             select distinct
@@ -83,10 +83,10 @@ from `medication`
                , site_name
         from
         (select distinct   patient_id
-                          , pim.institution_name        as site_name
-            from new_institutions pim
-                     left join institutions_1 inst
-                               on pim.institution_sc = inst.institution_sc_id
+                          , new.institution_name        as site_name
+            from new_institutions new
+                     left join institutions_1 old
+                               on new.institution_sc = old.institution_sc_id
             -- </editor-fold>
       ) sub
       )
